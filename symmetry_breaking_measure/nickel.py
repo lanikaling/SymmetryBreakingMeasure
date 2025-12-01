@@ -177,12 +177,24 @@ class Nickel(FiniteCluster):  # pylint: disable=too-many-instance-attributes
         facecolor=Any,
         in_plane: bool = None,
         center: bool = None,
+        highlight: str = None,
     ):
         """
         Plot the rectangular solid cluster of nickel atoms.
 
-        Returns:
-        --------
+        Parameters
+        ----------
+        in_plane : bool or None
+            Old behavior – kept for backward compatibility.
+        center : bool or None
+            Old behavior – kept for backward compatibility.
+        highlight : str or None
+            New behavior. If provided, overrides `in_plane` / `center` coloring:
+              - "top_bottom": only top & bottom face centers are dark.
+              - "side_faces": only four side face centers are dark.
+
+        Returns
+        -------
         ax : plt.Axes
             Axes.
         """
@@ -195,6 +207,7 @@ class Nickel(FiniteCluster):  # pylint: disable=too-many-instance-attributes
             cmap: LinearSegmentedColormap,
             in_plane=None,
             center=None,
+            highlight=None,
         ) -> None:
             """Plot the surface of the rectangular solid."""
             a_center, b_center, c_center = (
@@ -202,16 +215,72 @@ class Nickel(FiniteCluster):  # pylint: disable=too-many-instance-attributes
                 0.5 * self.lattice.b,
                 0.5 * self.lattice.c,
             )
-            if in_plane is True:
-                c = np.where(np.abs(samples[:, 2] - b_center) < 1, 1, 0)
-            elif in_plane is False:
-                c = np.where(np.abs(samples[:, 2] - b_center) < 1, 0, 1)
-            elif center is True:
-                c = np.where(np.any(np.abs(samples - 1.76) < 1, axis=1), 1, 0.2)
-            elif center is False:
-                c = np.where(np.any(np.abs(samples - 1.76) < 1, axis=1), 0.2, 1)
+
+            # Bounding box in Cartesian coordinates for face-center detection
+            x_min, y_min, z_min = samples.min(axis=0)
+            x_max, y_max, z_max = samples.max(axis=0)
+            x_mid = 0.5 * (x_min + x_max)
+            y_mid = 0.5 * (y_min + y_max)
+            z_mid = 0.5 * (z_min + z_max)
+
+            # Tolerances for "near" face centers (tunable)
+            tol_xy = 0.15 * min(x_max - x_min, y_max - y_min)
+            tol_z = 0.15 * (z_max - z_min)
+
+            if highlight == "top_bottom":
+                # Center in x,y; extremes in z
+                mask_top = (
+                    (np.abs(samples[:, 0] - x_mid) < tol_xy)
+                    & (np.abs(samples[:, 1] - y_mid) < tol_xy)
+                    & (np.abs(samples[:, 2] - z_max) < tol_z)
+                )
+                mask_bottom = (
+                    (np.abs(samples[:, 0] - x_mid) < tol_xy)
+                    & (np.abs(samples[:, 1] - y_mid) < tol_xy)
+                    & (np.abs(samples[:, 2] - z_min) < tol_z)
+                )
+                mask = mask_top | mask_bottom
+                c = np.where(mask, 1.0, 0.2)
+
+            elif highlight == "side_faces":
+                # 4 side faces: left/right (x-min/x-max), front/back (y-min/y-max),
+                # centered around z_mid
+                mask_left = (
+                    (np.abs(samples[:, 0] - x_min) < tol_xy)
+                    & (np.abs(samples[:, 1] - y_mid) < tol_xy)
+                    & (np.abs(samples[:, 2] - z_mid) < tol_z)
+                )
+                mask_right = (
+                    (np.abs(samples[:, 0] - x_max) < tol_xy)
+                    & (np.abs(samples[:, 1] - y_mid) < tol_xy)
+                    & (np.abs(samples[:, 2] - z_mid) < tol_z)
+                )
+                mask_front = (
+                    (np.abs(samples[:, 0] - x_mid) < tol_xy)
+                    & (np.abs(samples[:, 1] - y_min) < tol_xy)
+                    & (np.abs(samples[:, 2] - z_mid) < tol_z)
+                )
+                mask_back = (
+                    (np.abs(samples[:, 0] - x_mid) < tol_xy)
+                    & (np.abs(samples[:, 1] - y_max) < tol_xy)
+                    & (np.abs(samples[:, 2] - z_mid) < tol_z)
+                )
+                mask = mask_left | mask_right | mask_front | mask_back
+                c = np.where(mask, 1.0, 0.2)
+
             else:
-                c = np.linalg.norm(samples - [a_center, b_center, c_center], axis=1)
+                # === Original behavior preserved ===
+                if in_plane is True:
+                    c = np.where(np.abs(samples[:, 2] - b_center) < 1, 1, 0)
+                elif in_plane is False:
+                    c = np.where(np.abs(samples[:, 2] - b_center) < 1, 0, 1)
+                elif center is True:
+                    c = np.where(np.any(np.abs(samples - 1.76) < 1, axis=1), 1, 0.2)
+                elif center is False:
+                    c = np.where(np.any(np.abs(samples - 1.76) < 1, axis=1), 0.2, 1)
+                else:
+                    c = np.linalg.norm(samples - [a_center, b_center, c_center], axis=1)
+
             ax.scatter(
                 samples[:, 0],
                 samples[:, 1],
@@ -274,7 +343,7 @@ class Nickel(FiniteCluster):  # pylint: disable=too-many-instance-attributes
             ax.add_collection(lc)
 
         _plot_rectangular_solid_surface(
-            ax, samples, cmap, in_plane=in_plane, center=center
+            ax, samples, cmap, in_plane=in_plane, center=center, highlight=highlight
         )
         _plot_rectangular_solid_edges(ax, facecolor)
         ax.set_xlabel("X-axis")
